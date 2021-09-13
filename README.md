@@ -9,13 +9,6 @@ A linuxbase set of script for having a unsealed vault-system
 
 In this repo, arch-Linux is used as the Linux derivative. For other Linux systems, there are minor deviations, especially in the install service.
 
-## Setup
-
-Installing 
-
-```
-	/opt/vault-utils/setup.sh
-```
 
 ## Target
 - After setup this, you will have "vault-utils" command on path.
