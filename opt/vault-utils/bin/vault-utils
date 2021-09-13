@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+
+#IS_DEBUG=TRUE
+. /etc/vault/env/vault.env
+
+function baseInit() {
+  if [ ! -d ${VAULT_DATA} ]; then
+    mkdir -p ${VAULT_DATA}
+  fi
+
+  if [ ! -e ${FILE_INIT} ]; then
+    mkdir -p $(dirname ${FILE_INIT})
+    rm -f ${FILE_SEAL}
+    vault operator init >${FILE_INIT}
+  else
+    debug "${FILE_INIT}  exists!"
+    if [ "$(cat ${FILE_INIT} |tr -d ' ')" = "" ]; then
+        debug "* Creating FILE_INIT while is empty!!"
+        rm -f ${FILE_SEAL}
+        vault operator init >${FILE_INIT}
+    fi
+  fi
+}
+
+function getRootToken(){
+  echo $(cat ${FILE_INIT} |grep "Initial Root Token"|cut -d':' -f2 |tr -d " ")
+}
+function getUnsealKey(){
+  if [ -z $1 ]; then
+    error "Missing key-number"
+    exit 1
+  fi
+  NUM=$1
+  echo $(cat ${FILE_INIT} |grep "Unseal Key $NUM"|cut -d':' -f2 |tr -d " ")
+}
+function rootLogin() {
+  vault login $(getRootToken) >/dev/null
+}
+function userLogin() {
+  vault login -method=userpass username=$1 password=$2
+}
+function initUnseal() {
+  info "* Unsealing"
+  vault operator unseal $(getUnsealKey 1)
+  vault operator unseal $(getUnsealKey 2)
+  vault operator unseal $(getUnsealKey 3)
+  cp -f ${FILE_INIT} ${FILE_SEAL}
+}
+function isKvExists() {
+  seek=$1
+  vault-utils root
+  if [ "$seek" != "$(vault secrets list|grep ${seek}/ |cut -d ' ' -f1)" ]; then
+    echo 1
+  fi
+  echo 0
+}
+function createPolicyUserHome(){
+  info "* Creating Policy for UserHomes"
+  rootLogin
+  userpassname=$(vault read sys/auth --format=json|tr -d '/' | jq '.data.userpass.accessor'|tr -d '"')
+  echo -e "\npath \"auth/userpass/users/{{identity.entity.aliases.$userpassname.name}}\" {\n  capabilities = [ \"update\" ]\n  allowed_parameters = {\n    \"password\" = []  \n  }\n}" >$VAULT_POLICIES/homes.hcl
+}
+function createUserAdmin() {
+  vault auth enable userpass
+  vault write auth/userpass/users/admin password=${VAULT_ADMINPASS} policies=admins
+  #f_pol_admins=${VAULT_POLICIES}/admins.hcl
+  for f_pol in $(ls ${VAULT_POLICIES}/*.hcl); do
+    key=$(basename ${f_pol}|cut -d'.' -f1)
+    vault policy write ${key} ${f_pol}
+  done
+}
+function publishToken() {
+  warn "Publishing Token - this is only for LABs recomended. Please confirm with yes|y:"
+  read awPubTok
+  if [ "${awPubTok:0:1}" != "y" ]; then
+    exit 0
+  fi
+  info "Publishing token..."
+  mkdir -p /usr/share/nginx/html/token/
+  echo "<html><head><title>VAULT-Server TOKEN</title></head><body><pre>" > /usr/share/nginx/html/token/index.html
+  cat ${FILE_SEAL} |grep "Root Token"|cut -d':' -f2|tr -d ' ' >> /usr/share/nginx/html/token/index.html
+  echo "</pre></body></html>" >> /usr/share/nginx/html/token/index.html
+  chmod a+rx -R /usr/share/nginx/html/token
+}
+function updateRc() {
+  strRc="vault.rc"
+  if [ ! -e ~/.bashrc ]; then
+    touch ~/.bashrc
+  fi
+
+  isInRc=$(grep ${strRc} ~/.bashrc)
+  if [ "$?" = "1" ]; then
+    echo -e "\n# ${strRc}\n. vault-env\n">>~/.bashrc
+  fi
+}
+function setSettings() {
+  # logging
+  mkdir -p $(dirname ${VAULT_LOG_AUDIT})
+  vault audit enable file file_path=${VAULT_LOG_AUDIT}
+  vault audit enable -path="file_raw" file log_raw=true file_path=${VAULT_LOG_AUDIT}.raw
+  vault audit enable syslog tag="vault" facility="AUTH"
+
+  # admin-user
+  createUserAdmin
+  updateRc
+}
+
+
+function usage(){
+    echo "USAGE:"
+    echo " token - Get root Token"
+    echo " unseal - Unseal a seald vault server"
+    echo " key <num> - Get Unsealkey"
+    echo " setup - Set defaults"
+    echo " root - Login as root"
+    echo " login - Login 'USER' and 'PASSWORD'"
+}
+
+baseInit
+if [ ! -z $1 ]; then
+  case $1 in
+   "help"|"--help"|"--h"|"-h")
+    usage
+   ;;
+   "token")
+      getRootToken
+   ;;
+   "key")
+      if [ ! -z $2 ];then
+        getUnsealKey $2
+      fi
+   ;;
+   "root")
+    rootLogin
+   ;;
+   "login")
+    if [ -z $2 ] || [ -z $3 ];then
+      error "Need Username and Password!"
+      exit 1
+    fi
+    userLogin $2 $3
+   ;;
+   "setup")
+    rootLogin
+    setSettings
+   ;;
+   "publish")
+    publishToken
+   ;;
+   "unseal")
+      initUnseal
+      rootLogin
+      setSettings
+   ;;
+   "userhomes")
+	  createPolicyUserHome
+   ;;
+   *)
+     echo ""
+   ;;
+  esac
+fi
+

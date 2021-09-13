@@ -1,0 +1,14 @@
+[Install]
+WantedBy=multi-user.target
+
+[Unit]
+Description=Vault Server
+After=network-online.target
+
+[Service]
+ExecStart=/opt/vault-utils/vault-server startbin/vault-server start
+ExecStop=/opt/vault-utils/vault-server startbin/vault-server stop
+
+[Install]
+WantedBy=multi-user.target
+

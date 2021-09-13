@@ -1,0 +1,31 @@
+#!/bin/bash
+
+function vaultStart() {
+  echo "Starting Vault-Server"
+  vault server -config=/etc/vault/vault.d
+}
+function vaultStop() {
+  echo "Stopping Vault-Server"
+  kill -9 $(ps -ef |grep vault|grep server|grep config|awk {'print $2'})
+}
+function vaultStatus() {
+  echo "Vault-Server PID: $(ps -ef |grep vault|grep server|grep config|awk {'print $2'})"
+}
+case $1 in
+  "start")
+    vaultStart
+  ;;
+  "stop")
+    vaultStop
+  ;;
+  "restart")
+    vaultStop
+    vaultStart
+  ;;
+  "status")
+    vaultStatus
+  ;;
+  *)
+    echo "Usage: $0 [start|stop|restart|status]"
+  ;;
+esac

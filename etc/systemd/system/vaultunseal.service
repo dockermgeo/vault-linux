@@ -1,0 +1,9 @@
+[Unit]
+Description=Vault Server-Unseal
+After=vault.service
+
+[Service]
+ExecStart=/usr/local/bin/vault-utils unseal
+
+[Install]
+WantedBy=multi-user.target
